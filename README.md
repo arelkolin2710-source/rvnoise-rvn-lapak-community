@@ -67,3 +67,14 @@ Firestore tidak bisa menyimpan video, jadi video diunggah ke Cloudinary (paket g
 - Tombol "Pasang/tambah ke layar utama" dihapus. Sebagai gantinya, saat file `rvnoise.apk` ada di website, pengguna Android melihat tombol Unduh aplikasi (di layar masuk dan di beranda). Tombol hilang otomatis di dalam aplikasi itu sendiri.
 - Cara membuat file APK: lihat `PANDUAN-APK.md`.
 - `vercel.json` mengatur agar `rvnoise.apk` terunduh dengan benar dan `assetlinks.json` terbaca.
+
+
+## Pembaruan v9
+- Bagikan postingan ke teman/grup (kartu postingan di chat), ke cerita, salin tautan, atau aplikasi lain.
+- Notifikasi menampilkan preview konten; ketuk membuka postingannya (bukan profil). Tautan `#post=ID` juga membuka postingan.
+- Admin: tab Pengguna dengan tombol Hapus pengguna per orang, tab baru Fitur & Harga (harga promosi like, minimal pengikut eksklusif, tambah item dengan ikon otomatis dari nama).
+- Notifikasi melayang karena rules/login gagal dihilangkan (error login tampil di dalam form).
+- Musik menampilkan nama artis. Pengguna baru mendapat popup Centang Biru sekali.
+- Konten eksklusif (Centang Biru atau minimal pengikut sesuai admin), promosi like (default 20.000 per 1.000 like, diatur admin), streak chat harian.
+- Catatan: konten eksklusif dikunci di tampilan aplikasi. Karena aplikasi tidak memakai server, data postingan tetap bisa dibaca lewat API Firestore oleh pengguna yang paham teknis.
+- **Publikasikan ulang firestore.rules terbaru.**

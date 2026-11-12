@@ -136,7 +136,7 @@ service cloud.firestore {
         allow read: if me() == uid;
         allow create: if signedIn() && uid != me()
           && request.resource.data.from == me()
-          && request.resource.data.keys().hasOnly(['from', 'type', 'text', 'read', 'createdAt'])
+          && request.resource.data.keys().hasOnly(['from', 'type', 'text', 'read', 'createdAt', 'pid', 'sid'])
           && request.resource.data.text.size() <= 160
           && request.resource.data.read == false;
         allow update: if me() == uid && changed().hasOnly(['read']);
@@ -189,7 +189,7 @@ service cloud.firestore {
         && request.resource.data.likeCount == 0
         && request.resource.data.commentCount == 0
         && request.resource.data.type in ['photo', 'tweet', 'reel']
-        && request.resource.data.keys().hasOnly(['uid', 'type', 'text', 'images', 'music', 'video', 'repostOf', 'likeCount', 'commentCount', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'text', 'images', 'music', 'video', 'repostOf', 'excl', 'likeCount', 'commentCount', 'createdAt'])
         && request.resource.data.text.size() <= 500
         && cleanTxt(request.resource.data.text)
         && (isAdmin() || request.resource.data.uid == me());
@@ -269,9 +269,9 @@ service cloud.firestore {
           && request.resource.data.name.size() <= 40
           && cleanTxt(request.resource.data.name)));
       allow update: if signedIn() && me() in resource.data.members && (
-        changed().hasOnly(['last', 'lastAt', 'lastFrom'])
+        changed().hasOnly(['last', 'lastAt', 'lastFrom', 'st', 'stDay', 'ud'])
         // menerima permintaan pesan (hanya penerima, bukan pengirim)
-        || (!isGrp() && changed().hasOnly(['last', 'lastAt', 'lastFrom', 'req'])
+        || (!isGrp() && changed().hasOnly(['last', 'lastAt', 'lastFrom', 'req', 'st', 'stDay', 'ud'])
               && request.resource.data.req == false && resource.data.get('reqFrom', '') != me())
         // pembuat grup mengelola nama, foto, anggota
         || (isGrp() && resource.data.owner == me()
@@ -285,7 +285,7 @@ service cloud.firestore {
         allow read: if signedIn() && me() in get(/databases/$(database)/documents/chats/$(cid)).data.members;
         allow create: if signedIn() && request.resource.data.from == me()
           && me() in get(/databases/$(database)/documents/chats/$(cid)).data.members
-          && request.resource.data.keys().hasOnly(['from', 'text', 'img', 'kind', 'createdAt'])
+          && request.resource.data.keys().hasOnly(['from', 'text', 'img', 'kind', 'ref', 'createdAt'])
           && request.resource.data.text.size() <= 1000
           && cleanTxt(request.resource.data.text);
         allow update: if false;
@@ -392,7 +392,7 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.uid == me()
         && usr(me()).badges.hasAny(['artist'])
-        && request.resource.data.keys().hasOnly(['uid', 'title', 'cover', 'audioUrl', 'audioData', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['uid', 'title', 'artist', 'cover', 'audioUrl', 'audioData', 'createdAt'])
         && request.resource.data.title.size() <= 80;
       allow update: if false;
       allow delete: if signedIn() && (resource.data.uid == me() || isAdmin());
@@ -427,7 +427,30 @@ service cloud.firestore {
       allow read, delete: if isAdmin();
     }
 
-    // Pengaturan global: postingan yang disematkan (hanya admin)
+    // Promosi like: dibayar lewat transfer ke akun resmi. Harga diatur admin di config/pricing (default 20000 per paket).
+    match /promos/{pid} {
+      function likePrice() {
+        return exists(/databases/$(database)/documents/config/pricing)
+          ? get(/databases/$(database)/documents/config/pricing).data.get('likePrice', 20000)
+          : 20000;
+      }
+      function tx() { return getAfter(/databases/$(database)/documents/transfers/$(request.resource.data.tid)).data; }
+      function paid() {
+        return request.resource.data.keys().hasOnly(['uid', 'pid', 'packs', 'target', 'startLikes', 'price', 'tid', 'active', 'at'])
+          && request.resource.data.uid == me()
+          && request.resource.data.pid == pid
+          && request.resource.data.packs is int && request.resource.data.packs >= 1 && request.resource.data.packs <= 50
+          && get(/databases/$(database)/documents/posts/$(pid)).data.uid == me()
+          && tx().from == me() && tx().to == 'official-rvnoise'
+          && tx().amount == request.resource.data.packs * likePrice()
+          && request.resource.data.price == tx().amount;
+      }
+      allow read: if signedIn();
+      allow create, update: if signedIn() && paid();
+      allow update, delete: if isAdmin();
+    }
+
+    // Pengaturan global: postingan yang disematkan, harga promosi (hanya admin)
     match /config/{id} {
       allow read: if signedIn();
       allow write: if isAdmin();
