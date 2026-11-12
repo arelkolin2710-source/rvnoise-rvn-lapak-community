@@ -61,3 +61,9 @@ Firestore tidak bisa menyimpan video, jadi video diunggah ke Cloudinary (paket g
 - Reels layar penuh: tab Untuk Kamu / Mengikuti, ikuti (+), suka, komentar, simpan, bagikan, mute, jumlah tayangan.
 - RVNMATCH: pilih hobi (emoji), introvert/ekstrovert, akhir pekan, bahasa cinta, persentase kecocokan.
 - Game baru: Dinding Kejujuran, Kata RVN, Roda Truth or Dare, Kuis Kepribadian, Tebak Emoji.
+
+
+## Pembaruan v8: unduh aplikasi (APK)
+- Tombol "Pasang/tambah ke layar utama" dihapus. Sebagai gantinya, saat file `rvnoise.apk` ada di website, pengguna Android melihat tombol Unduh aplikasi (di layar masuk dan di beranda). Tombol hilang otomatis di dalam aplikasi itu sendiri.
+- Cara membuat file APK: lihat `PANDUAN-APK.md`.
+- `vercel.json` mengatur agar `rvnoise.apk` terunduh dengan benar dan `assetlinks.json` terbaca.
