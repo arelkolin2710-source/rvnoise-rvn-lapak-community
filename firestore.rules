@@ -1,0 +1,446 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    // Admin = Gmail areelkolin@gmail.com yang sudah terverifikasi (login Google), atau dokumen admins/{uid} buatan manual.
+    function isAdmin() {
+      return signedIn() && (
+        (request.auth.token.email == 'areelkolin@gmail.com' && request.auth.token.email_verified == true)
+        || exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+    function usr(u) { return get(/databases/$(database)/documents/users/$(u)).data; }
+    function catPrice(id) { return get(/databases/$(database)/documents/catalog/$(id)).data.price; }
+    function catKind(id) { return get(/databases/$(database)/documents/catalog/$(id)).data.kind; }
+    // Filter kata kasar otomatis (berjalan 24 jam di server Firebase)
+    function cleanTxt(t) { return !t.lower().matches('(?s).*(kontol|memek|ngentot|bangsat|bajingan|jancok|jancuk|pepek|anjing|pelacur|bokep|ngewe|fuck|bitch|nigger|nigga|whore).*'); }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    match /admins/{id} {
+      allow read: if signedIn() && request.auth.uid == id;
+      allow write: if false;
+    }
+
+    match /usernames/{name} {
+      allow read: if true;
+      allow create: if isAdmin() || (signedIn()
+        && request.resource.data.uid == me()
+        && request.resource.data.email == request.auth.token.email
+        && !(name in ['rvnoise', 'rvnois', 'admin', 'administrator', 'official', 'staff'])
+        && cleanTxt(name));
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (signedIn() && resource.data.uid == me());
+    }
+
+    match /accounts/{no} {
+      allow read: if signedIn();
+      allow create: if isAdmin() || (signedIn() && request.resource.data.uid == me());
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (signedIn() && resource.data.uid == me());
+    }
+
+    match /users/{uid} {
+      function txPath() { return /databases/$(database)/documents/transfers/$(request.resource.data.lastTx); }
+      function sendOk() {
+        return !exists(txPath()) && existsAfter(txPath())
+          && getAfter(txPath()).data.from == uid
+          && request.resource.data.balance == resource.data.balance - getAfter(txPath()).data.amount
+          && request.resource.data.balance >= 0;
+      }
+      function recvOk() {
+        return !exists(txPath()) && existsAfter(txPath())
+          && getAfter(txPath()).data.to == uid
+          && getAfter(txPath()).data.from == request.auth.uid
+          && request.resource.data.balance == resource.data.balance + getAfter(txPath()).data.amount;
+      }
+
+      allow read: if signedIn();
+      allow create: if isAdmin() || (
+        me() == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.balance == 0
+        && request.resource.data.verified == false
+        && request.resource.data.official == false
+        && request.resource.data.affiliate == false
+        && request.resource.data.perks == {}
+        && request.resource.data.badges == []
+        && request.resource.data.emojiBadge == ''
+        && !('banned' in request.resource.data)
+        && request.resource.data.get('spent', 0) == 0
+        && request.resource.data.type in ['personal', 'agency', 'group']
+        && request.resource.data.agencyStatus in ['', 'pending']
+        && request.resource.data.usernameLower is string
+      );
+      allow update: if isAdmin()
+        || (me() == uid && changed().hasOnly(['displayName', 'bio', 'photoURL', 'bannerURL', 'link', 'theme', 'relStatus', 'spotify', 'privacy']))
+        || (me() == uid && changed().hasOnly(['emojiBadge']) && resource.data.perks.get('emoji', false) == true)
+        || (me() == uid && changed().hasOnly(['balance', 'lastTx']) && sendOk())
+        || (me() == uid && changed().hasOnly(['balance', 'lastTx', 'spent']) && sendOk()
+            && getAfter(txPath()).data.to == 'official-rvnoise'
+            && request.resource.data.spent == resource.data.get('spent', 0) + getAfter(txPath()).data.amount)
+        || (signedIn() && me() != uid && changed().hasOnly(['balance', 'lastTx']) && recvOk());
+      allow delete: if isAdmin() || me() == uid;
+
+      function trP(id) { return /databases/$(database)/documents/transfers/$(id); }
+      function opP(id) { return /databases/$(database)/documents/giftOps/$(id); }
+
+      // Inventaris hadiah: bertambah hanya lewat pembelian resmi (transfer ke official) atau menerima hadiah; berkurang hanya saat mengirim.
+      match /inventory/{gid} {
+        function oldC() { return resource == null ? 0 : resource.data.count; }
+        function newC() { return request.resource.data.count; }
+        allow read: if signedIn();
+        allow create, update: if signedIn()
+          && request.resource.data.keys().hasOnly(['count', 'lastOp'])
+          && newC() is int && newC() >= 0 && newC() != oldC()
+          && request.resource.data.lastOp is string
+          && (
+            (me() == uid && newC() > oldC() && catKind(gid) == 'gift'
+              && !exists(trP(request.resource.data.lastOp)) && existsAfter(trP(request.resource.data.lastOp))
+              && getAfter(trP(request.resource.data.lastOp)).data.from == me()
+              && getAfter(trP(request.resource.data.lastOp)).data.to == 'official-rvnoise'
+              && getAfter(trP(request.resource.data.lastOp)).data.amount == catPrice(gid) * (newC() - oldC()))
+            || (me() == uid && newC() < oldC()
+              && !exists(opP(request.resource.data.lastOp))
+              && getAfter(opP(request.resource.data.lastOp)).data.from == me()
+              && getAfter(opP(request.resource.data.lastOp)).data.gid == gid
+              && getAfter(opP(request.resource.data.lastOp)).data.qty == oldC() - newC())
+            || (me() != uid && newC() > oldC()
+              && !exists(opP(request.resource.data.lastOp))
+              && getAfter(opP(request.resource.data.lastOp)).data.from == me()
+              && getAfter(opP(request.resource.data.lastOp)).data.to == uid
+              && getAfter(opP(request.resource.data.lastOp)).data.gid == gid
+              && getAfter(opP(request.resource.data.lastOp)).data.qty == newC() - oldC())
+          );
+        allow delete: if isAdmin() || me() == uid;
+      }
+
+      // Aset investasi: hanya bertambah lewat pembelian resmi.
+      match /assets/{aid} {
+        allow read: if signedIn();
+        allow create, update: if me() == uid
+          && request.resource.data.keys().hasOnly(['count', 'lastOp'])
+          && request.resource.data.count is int
+          && request.resource.data.count > (resource == null ? 0 : resource.data.count)
+          && request.resource.data.lastOp is string
+          && catKind(aid) == 'asset'
+          && !exists(trP(request.resource.data.lastOp)) && existsAfter(trP(request.resource.data.lastOp))
+          && getAfter(trP(request.resource.data.lastOp)).data.from == me()
+          && getAfter(trP(request.resource.data.lastOp)).data.to == 'official-rvnoise'
+          && getAfter(trP(request.resource.data.lastOp)).data.amount
+               == catPrice(aid) * (request.resource.data.count - (resource == null ? 0 : resource.data.count));
+        allow delete: if isAdmin() || me() == uid;
+      }
+
+      match /notifs/{nid} {
+        allow read: if me() == uid;
+        allow create: if signedIn() && uid != me()
+          && request.resource.data.from == me()
+          && request.resource.data.keys().hasOnly(['from', 'type', 'text', 'read', 'createdAt'])
+          && request.resource.data.text.size() <= 160
+          && request.resource.data.read == false;
+        allow update: if me() == uid && changed().hasOnly(['read']);
+        allow delete: if me() == uid || isAdmin();
+      }
+
+      match /saved/{pid} {
+        allow read, write: if signedIn() && (me() == uid || isAdmin());
+      }
+      // Stiker/GIF pribadi dan preferensi chat (arsip)
+      match /stickers/{sid} {
+        allow read, write: if signedIn() && (me() == uid || isAdmin());
+      }
+      match /chatPrefs/{cid} {
+        allow read, write: if signedIn() && (me() == uid || isAdmin());
+      }
+      // Sorotan (highlight) profil
+      match /highlights/{hid} {
+        allow read: if signedIn();
+        allow write: if signedIn() && (me() == uid || isAdmin());
+      }
+    }
+
+    // Transfer, top up, hadiah, dan beli produk semuanya lewat dokumen ini.
+    match /transfers/{tid} {
+      allow read: if signedIn() && (resource.data.from == me() || resource.data.to == me() || isAdmin());
+      allow create: if signedIn()
+        && request.resource.data.from == me()
+        && request.resource.data.to != me()
+        && request.resource.data.amount is int
+        && request.resource.data.amount > 0
+        && existsAfter(/databases/$(database)/documents/users/$(request.resource.data.to))
+        && getAfter(/databases/$(database)/documents/users/$(me())).data.lastTx == tid;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /follows/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && (request.resource.data.follower == me() || isAdmin())
+        && id == request.resource.data.follower + '_' + request.resource.data.followee;
+      allow delete: if signedIn() && (resource.data.follower == me() || resource.data.followee == me() || isAdmin());
+      allow update: if false;
+    }
+
+    match /posts/{pid} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.likeCount == 0
+        && request.resource.data.commentCount == 0
+        && request.resource.data.type in ['photo', 'tweet', 'reel']
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'text', 'images', 'music', 'video', 'repostOf', 'likeCount', 'commentCount', 'createdAt'])
+        && request.resource.data.text.size() <= 500
+        && cleanTxt(request.resource.data.text)
+        && (isAdmin() || request.resource.data.uid == me());
+      allow update: if signedIn() && (
+        isAdmin()
+        || (changed().hasOnly(['likeCount']) && (
+              (request.resource.data.likeCount == resource.data.likeCount + 1
+                && !exists(/databases/$(database)/documents/posts/$(pid)/likes/$(me()))
+                && existsAfter(/databases/$(database)/documents/posts/$(pid)/likes/$(me())))
+           || (request.resource.data.likeCount == resource.data.likeCount - 1
+                && exists(/databases/$(database)/documents/posts/$(pid)/likes/$(me()))
+                && !existsAfter(/databases/$(database)/documents/posts/$(pid)/likes/$(me())))))
+        || (changed().hasOnly(['commentCount'])
+              && math.abs(request.resource.data.commentCount - resource.data.commentCount) == 1)
+      );
+      allow delete: if signedIn() && (resource.data.uid == me() || isAdmin());
+
+      match /likes/{u} {
+        allow read: if signedIn();
+        allow create: if signedIn() && u == me();
+        allow delete: if signedIn() && (u == me() || isAdmin() || get(/databases/$(database)/documents/posts/$(pid)).data.uid == me());
+      }
+      // Tayangan reels: satu dokumen per pengguna
+      match /rviews/{u} {
+        allow read: if signedIn();
+        allow create: if signedIn() && u == me();
+        allow delete: if isAdmin();
+      }
+      // Komentar & balasan (field parent/toUser opsional)
+      match /comments/{cid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.uid == me() && request.resource.data.text.size() <= 500
+          && cleanTxt(request.resource.data.text);
+        allow delete: if signedIn() && (resource.data.uid == me() || isAdmin() || get(/databases/$(database)/documents/posts/$(pid)).data.uid == me());
+      }
+    }
+
+    match /stories/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.uid == me()
+        && request.resource.data.keys().hasOnly(['uid', 'image', 'text', 'createdAt'])
+        && request.resource.data.text.size() <= 120
+        && cleanTxt(request.resource.data.text);
+      allow update: if false;
+      allow delete: if signedIn() && (resource.data.uid == me() || isAdmin());
+
+      match /views/{u} {
+        allow read: if signedIn() && (u == me() || get(/databases/$(database)/documents/stories/$(id)).data.uid == me());
+        allow create: if signedIn() && u == me();
+        allow delete: if isAdmin() || get(/databases/$(database)/documents/stories/$(id)).data.uid == me();
+      }
+      match /likes/{u} {
+        allow read: if signedIn() && (u == me() || get(/databases/$(database)/documents/stories/$(id)).data.uid == me());
+        allow create: if signedIn() && u == me();
+        allow delete: if signedIn() && (u == me() || get(/databases/$(database)/documents/stories/$(id)).data.uid == me() || isAdmin());
+      }
+      // Komentar cerita: semua pengguna bisa melihat dan saling membalas
+      match /replies/{r} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.uid == me() && request.resource.data.text.size() <= 300
+          && cleanTxt(request.resource.data.text);
+        allow delete: if signedIn() && (resource.data.uid == me() || isAdmin() || get(/databases/$(database)/documents/stories/$(id)).data.uid == me());
+      }
+    }
+
+    match /chats/{cid} {
+      function isGrp() { return resource.data.get('isGroup', false) == true; }
+      allow read: if signedIn() && (resource == null || me() in resource.data.members);
+      allow create: if signedIn() && me() in request.resource.data.members && (
+        (request.resource.data.get('isGroup', false) == false
+          && request.resource.data.members.size() == 2
+          && cid == request.resource.data.members[0] + '_' + request.resource.data.members[1])
+        || (request.resource.data.get('isGroup', false) == true
+          && request.resource.data.owner == me()
+          && request.resource.data.members.size() <= 50
+          && request.resource.data.name.size() <= 40
+          && cleanTxt(request.resource.data.name)));
+      allow update: if signedIn() && me() in resource.data.members && (
+        changed().hasOnly(['last', 'lastAt', 'lastFrom'])
+        // menerima permintaan pesan (hanya penerima, bukan pengirim)
+        || (!isGrp() && changed().hasOnly(['last', 'lastAt', 'lastFrom', 'req'])
+              && request.resource.data.req == false && resource.data.get('reqFrom', '') != me())
+        // pembuat grup mengelola nama, foto, anggota
+        || (isGrp() && resource.data.owner == me()
+              && changed().hasOnly(['members', 'name', 'photo', 'kind', 'last', 'lastAt', 'lastFrom'])
+              && request.resource.data.name.size() <= 40 && cleanTxt(request.resource.data.name))
+        // anggota boleh keluar dari grup
+        || (isGrp() && changed().hasOnly(['members']) && !(me() in request.resource.data.members)
+              && request.resource.data.members.size() == resource.data.members.size() - 1));
+      allow delete: if isAdmin();
+      match /messages/{mid} {
+        allow read: if signedIn() && me() in get(/databases/$(database)/documents/chats/$(cid)).data.members;
+        allow create: if signedIn() && request.resource.data.from == me()
+          && me() in get(/databases/$(database)/documents/chats/$(cid)).data.members
+          && request.resource.data.keys().hasOnly(['from', 'text', 'img', 'kind', 'createdAt'])
+          && request.resource.data.text.size() <= 1000
+          && cleanTxt(request.resource.data.text);
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /shopItems/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /orders/{id} {
+      allow create: if signedIn() && request.resource.data.uid == me() && request.resource.data.status == 'pending'
+        && request.resource.data.type in ['item', 'topup'];
+      allow read: if signedIn() && (resource.data.uid == me() || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /products/{pid} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.sellerUid == me() && usr(me()).affiliate == true
+        && request.resource.data.price is int && request.resource.data.price > 0;
+      allow update, delete: if signedIn() && (resource.data.sellerUid == me() || isAdmin());
+
+      match /secret/{d} {
+        allow read: if signedIn() && (
+          get(/databases/$(database)/documents/products/$(pid)).data.sellerUid == me()
+          || exists(/databases/$(database)/documents/purchases/$(me() + '_' + pid))
+          || isAdmin());
+        allow create, update: if signedIn() && getAfter(/databases/$(database)/documents/products/$(pid)).data.sellerUid == me();
+        allow delete: if signedIn() && (get(/databases/$(database)/documents/products/$(pid)).data.sellerUid == me() || isAdmin());
+      }
+    }
+
+    match /purchases/{id} {
+      allow read: if signedIn() && (resource.data.uid == me() || isAdmin()
+        || get(/databases/$(database)/documents/products/$(resource.data.pid)).data.sellerUid == me());
+      allow create: if signedIn()
+        && request.resource.data.uid == me()
+        && id == me() + '_' + request.resource.data.pid
+        && getAfter(/databases/$(database)/documents/transfers/$(request.resource.data.tid)).data.from == me()
+        && getAfter(/databases/$(database)/documents/transfers/$(request.resource.data.tid)).data.to
+             == get(/databases/$(database)/documents/products/$(request.resource.data.pid)).data.sellerUid
+        && getAfter(/databases/$(database)/documents/transfers/$(request.resource.data.tid)).data.amount
+             == get(/databases/$(database)/documents/products/$(request.resource.data.pid)).data.price;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /lives/{uid} {
+      allow read: if signedIn();
+      allow write: if signedIn() && (me() == uid || isAdmin());
+      match /viewers/{v} {
+        allow read: if signedIn();
+        allow write: if signedIn() && (v == me() || isAdmin());
+      }
+      // Sinyal WebRTC untuk suara & video live (penonton membuat offer, host menjawab)
+      match /rtc/{rid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.vid == me();
+        allow update: if signedIn() && (me() == uid || resource.data.vid == me());
+        allow delete: if signedIn() && (me() == uid || resource.data.vid == me() || isAdmin());
+        match /host/{c} {
+          allow read, create, delete: if signedIn();
+        }
+        match /viewer/{c} {
+          allow read, create, delete: if signedIn();
+        }
+      }
+      match /chat/{c} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.uid == me() && request.resource.data.text.size() <= 200
+          && cleanTxt(request.resource.data.text);
+        allow delete: if signedIn() && (me() == uid || isAdmin());
+      }
+    }
+
+    // Katalog hadiah dan aset (harga diatur admin)
+    match /catalog/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // Catatan pengiriman hadiah (juga dipakai untuk Top Hadiah di live)
+    match /giftOps/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.from == me()
+        && request.resource.data.to != me()
+        && request.resource.data.keys().hasOnly(['from', 'to', 'gid', 'qty', 'ctx', 'createdAt'])
+        && request.resource.data.qty is int && request.resource.data.qty > 0 && request.resource.data.qty <= 99
+        && request.resource.data.ctx is string && request.resource.data.ctx.size() <= 70
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.to))
+        && getAfter(/databases/$(database)/documents/users/$(me())/inventory/$(request.resource.data.gid)).data.lastOp == id
+        && getAfter(/databases/$(database)/documents/users/$(request.resource.data.to)/inventory/$(request.resource.data.gid)).data.lastOp == id;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Musik dari akun berlencana artis
+    match /tracks/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.uid == me()
+        && usr(me()).badges.hasAny(['artist'])
+        && request.resource.data.keys().hasOnly(['uid', 'title', 'cover', 'audioUrl', 'audioData', 'createdAt'])
+        && request.resource.data.title.size() <= 80;
+      allow update: if false;
+      allow delete: if signedIn() && (resource.data.uid == me() || isAdmin());
+    }
+
+    // Game RVNMATCH
+    match /matchPool/{u} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && me() == u && request.resource.data.uid == me()
+        && request.resource.data.about.size() <= 160 && request.resource.data.looking.size() <= 160
+        && cleanTxt(request.resource.data.about) && cleanTxt(request.resource.data.looking)
+        && request.resource.data.get('hobbies', []).size() <= 8;
+      allow delete: if signedIn() && (me() == u || isAdmin());
+    }
+    match /matchSwipes/{id} {
+      allow read: if signedIn() && (resource.data.from == me() || resource.data.to == me() || isAdmin());
+      allow create: if signedIn() && request.resource.data.from == me() && id == me() + '_' + request.resource.data.to;
+      allow update: if signedIn() && resource.data.from == me() && request.resource.data.from == me();
+      allow delete: if signedIn() && (resource.data.from == me() || isAdmin());
+    }
+
+    // Dinding Kejujuran: teks anonim; pemilik asli hanya bisa dibaca admin
+    match /confess/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.keys().hasOnly(['text', 'at'])
+        && request.resource.data.text is string && request.resource.data.text.size() <= 300
+        && cleanTxt(request.resource.data.text);
+      allow delete: if isAdmin();
+    }
+    match /confessMeta/{id} {
+      allow create: if signedIn() && request.resource.data.uid == me();
+      allow read, delete: if isAdmin();
+    }
+
+    // Pengaturan global: postingan yang disematkan (hanya admin)
+    match /config/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // Laporan pengguna dan catatan percobaan yang diblokir filter
+    match /reports/{id} {
+      allow create: if signedIn() && request.resource.data.by == me();
+      allow read, update, delete: if isAdmin();
+    }
+    match /modLog/{id} {
+      allow create: if signedIn();
+      allow read, delete: if isAdmin();
+    }
+  }
+}
