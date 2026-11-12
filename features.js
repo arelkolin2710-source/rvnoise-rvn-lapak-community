@@ -463,10 +463,20 @@ const NIC={like:'heart',comment:'comment',follow:'user',gift:'gift',repost:'repo
 views.notifs=async function(){const t=S.tok;$('#main').innerHTML=`${back('home')}Notifikasi</h3><span class="sp"></span><button class="btn sm soft" data-act="notif">Aktifkan di HP</button></div><div id="nl" class="card">${SK}</div>`;
 let s;try{s=await getDocs(query(collection(db,'users',S.uid,'notifs'),orderBy('createdAt','desc'),limit(60)))}catch(e){$('#nl').innerHTML='<p class="mut c pad">Notifikasi belum bisa dimuat.</p>';return}
 const ns=s.docs.map(d=>({ref:d.ref,...d.data()}));await Promise.all([...ns.map(n=>getUser(n.from)),...ns.filter(n=>n.pid).map(n=>postMini(n.pid)),...ns.filter(n=>n.sid).map(n=>storyMini(n.sid))]);if(t!==S.tok)return;
-$('#nl').innerHTML=ns.length?ns.map(n=>{const u=S.users[n.from]||{};let thumb='',at=`data-act="go" data-v="profile" data-a="${n.from}"`;
+const grp=n=>n.pid&&n.type=='like'?'l'+n.pid:n.sid&&n.type=='story'&&/^menyukai/.test(n.text)?'s'+n.sid:n.type=='follow'&&/^mulai mengikuti/.test(n.text)?'f':null;
+const items=[],gm={};ns.forEach(n=>{const g=grp(n);if(!g){items.push({n,list:[n]});return}const k=g+(n.read?'r':'u');if(gm[k]){gm[k].list.push(n)}else{gm[k]={n,list:[n]};items.push(gm[k])}});
+const dayMs=864e5,now=Date.now(),secOf=n=>{if(!n.read)return 0;const m=n.createdAt?.toMillis?n.createdAt.toMillis():now,d=now-m;return d<dayMs?1:d<7*dayMs?2:d<30*dayMs?3:4};
+const SEC=['Baru','Hari ini','Minggu ini','Bulan ini','Sebelumnya'];
+const nm=l=>{const names=[...new Set(l.map(x=>S.users[x.from]?.username||'pengguna'))];const b=x=>`<b>${esc(x)}</b>`;if(names.length==1)return b(names[0]);if(names.length==2)return b(names[0])+' dan '+b(names[1]);return b(names[0])+', '+b(names[1])+', dan '+(names.length-2)+' lainnya'};
+const row=({n,list})=>{const u=S.users[n.from]||{};let thumb='',at=`data-act="go" data-v="profile" data-a="${n.from}"`;
 if(n.pid){const p=PC[n.pid];thumb=p?`<div class="nth">${thumbOf(p)}</div>`:'<div class="nth gone">&times;</div>';if(p)at=`data-act="go" data-v="post" data-a="${n.pid}${n.type=='comment'?':c':''}"`}
 else if(n.sid){const st=SM[n.sid];thumb=st?`<div class="nth"><img src="${esc(st.image)}" alt=""></div>`:'<div class="nth gone">&times;</div>';if(st)at=`data-act="nstory" data-id="${n.sid}"`}
-return`<div class="chat-item ${n.read?'':'unread'}" ${at}><span class="nic">${ic(NIC[n.type]||'bell')}</span><span data-act="go" data-v="profile" data-a="${n.from}">${av(u)}</span><div class="sp"><div><b>@${esc(u.username)}</b> ${esc(n.text)}</div><div class="un">${ago(n.createdAt)}</div></div>${thumb}</div>`}).join(''):'<p class="mut c pad">Belum ada notifikasi. Like, komentar, pengikut baru, dan hadiah muncul di sini.</p>';
+const second=list.map(x=>x.from).find(x=>x!=n.from),u2=second?S.users[second]:null;
+const avh=u2?`<div class="nav2"><span class="a1">${av(u)}</span><span class="a2">${av(u2)}</span><span class="nbd">${ic(NIC[n.type]||'bell')}</span></div>`:`<div class="nav2 one"><span class="a1">${av(u)}</span><span class="nbd">${ic(NIC[n.type]||'bell')}</span></div>`;
+const unread=list.some(x=>!x.read);
+return`<div class="chat-item nrow ${unread?'unread':''}" ${at}>${avh}<div class="sp"><div class="ntx">${nm(list)} ${esc(n.text)} <span class="un">${ago(n.createdAt)}</span></div></div>${thumb}</div>`};
+let html='',last=-1;items.forEach(it=>{const s=secOf(it.list[0]);if(s!==last){html+=`<div class="nsec">${SEC[s]}</div>`;last=s}html+=row(it)});
+$('#nl').innerHTML=ns.length?html:'<p class="mut c pad">Belum ada notifikasi. Like, komentar, pengikut baru, dan hadiah muncul di sini.</p>';
 const un=ns.filter(n=>!n.read);if(un.length){const b=writeBatch(db);un.slice(0,400).forEach(n=>b.update(n.ref,{read:true}));b.commit().catch(()=>{})}};
 A.nstory=async e=>{const st=await storyMini(e.dataset.id);if(!st)return;S.stories=S.stories||[];if(!S.stories.some(x=>x.id==st.id))S.stories.push(st);ACT.story({dataset:{u:st.uid}})};
 

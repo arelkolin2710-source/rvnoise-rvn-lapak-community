@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>RVN NOISE LAPAK COMMUNITY</title>
 <meta name="description" content="RVNOISE - Lapak Komunitas RVN">
 <meta name="theme-color" content="#e4f6ff">
@@ -16,6 +16,19 @@
 <body>
 <div id="root"><div class="boot"><div class="logo big"><span class="lr">R</span><span class="lv">V</span><span class="ln">NOISE</span></div></div></div>
 <div id="toast"></div>
+<script>
+/* Mode aplikasi: tanpa zoom, tanpa seleksi teks, tanpa menu salin / Google */
+(function(){var ok=function(t){t=t&&(t.nodeType==1?t:t.parentElement);return !!(t&&t.closest&&t.closest('input,textarea,[contenteditable="true"]'))};
+var o={passive:false};
+document.addEventListener('contextmenu',function(e){if(!ok(e.target))e.preventDefault()});
+document.addEventListener('selectstart',function(e){if(!ok(e.target))e.preventDefault()});
+document.addEventListener('dragstart',function(e){if(!ok(e.target))e.preventDefault()});
+['gesturestart','gesturechange','gestureend'].forEach(function(n){document.addEventListener(n,function(e){e.preventDefault()},o)});
+document.addEventListener('touchmove',function(e){if(e.touches&&e.touches.length>1)e.preventDefault()},o);
+document.addEventListener('wheel',function(e){if(e.ctrlKey)e.preventDefault()},o);
+document.addEventListener('keydown',function(e){if((e.ctrlKey||e.metaKey)&&['+','-','=','0'].indexOf(e.key)>-1)e.preventDefault()});
+})();
+</script>
 <script type="module" src="app.js"></script>
 </body>
 </html>
