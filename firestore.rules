@@ -79,10 +79,40 @@ service cloud.firestore {
         || (me() == uid && changed().hasOnly(['balance', 'lastTx', 'spent']) && sendOk()
             && getAfter(txPath()).data.to == 'official-rvnoise'
             && request.resource.data.spent == resource.data.get('spent', 0) + getAfter(txPath()).data.amount)
-        || (signedIn() && me() != uid && changed().hasOnly(['balance', 'lastTx']) && recvOk());
+        || (signedIn() && me() != uid && changed().hasOnly(['balance', 'lastTx']) && recvOk())
+        || (me() == uid && changed().hasOnly(['balance', 'lastRw', 'rwN']) && rewardOk())
+        || (me() == uid && changed().hasOnly(['balance', 'lastSell']) && sellOk());
       allow delete: if isAdmin() || me() == uid;
 
       function trP(id) { return /databases/$(database)/documents/transfers/$(id); }
+
+      // Hadiah like: tiap 100 like (postingan atau lagu milik sendiri) = 10 noisevn, sekali per kelipatan 100.
+      function rwP() { return /databases/$(database)/documents/users/$(uid)/rewards/$(request.resource.data.lastRw); }
+      function rwRef() { return getAfter(rwP()).data.ref; }
+      function rwDoc() {
+        return getAfter(rwP()).data.kind == 'post'
+          ? get(/databases/$(database)/documents/posts/$(rwRef()))
+          : get(/databases/$(database)/documents/tracks/$(rwRef()));
+      }
+      function rwOld() { return exists(rwP()) ? get(rwP()).data.n : 0; }
+      function rewardOk() {
+        return request.resource.data.lastRw is string
+          && request.resource.data.rwN is int
+          && existsAfter(rwP())
+          && getAfter(rwP()).data.n == request.resource.data.rwN
+          && request.resource.data.rwN > rwOld()
+          && request.resource.data.rwN * 100 <= rwDoc().data.get('likeCount', 0)
+          && rwDoc().data.uid == me()
+          && request.resource.data.balance == resource.data.balance + 10 * (request.resource.data.rwN - rwOld());
+      }
+      // Tukar aset jadi uang: dicatat di sells/{id}; nilai tukar 90% harga katalog.
+      function sellOk() {
+        return request.resource.data.lastSell is string
+          && !exists(/databases/$(database)/documents/sells/$(request.resource.data.lastSell))
+          && existsAfter(/databases/$(database)/documents/sells/$(request.resource.data.lastSell))
+          && getAfter(/databases/$(database)/documents/sells/$(request.resource.data.lastSell)).data.uid == me()
+          && request.resource.data.balance == resource.data.balance + getAfter(/databases/$(database)/documents/sells/$(request.resource.data.lastSell)).data.refund;
+      }
       function opP(id) { return /databases/$(database)/documents/giftOps/$(id); }
 
       // Inventaris hadiah: bertambah hanya lewat pembelian resmi (transfer ke official) atau menerima hadiah; berkurang hanya saat mengirim.
@@ -129,14 +159,36 @@ service cloud.firestore {
           && getAfter(trP(request.resource.data.lastOp)).data.to == 'official-rvnoise'
           && getAfter(trP(request.resource.data.lastOp)).data.amount
                == catPrice(aid) * (request.resource.data.count - (resource == null ? 0 : resource.data.count));
+        allow update: if me() == uid
+          && request.resource.data.keys().hasOnly(['count', 'lastOp'])
+          && request.resource.data.count is int
+          && request.resource.data.count >= 0
+          && request.resource.data.count < resource.data.count
+          && request.resource.data.lastOp is string
+          && !exists(/databases/$(database)/documents/sells/$(request.resource.data.lastOp))
+          && existsAfter(/databases/$(database)/documents/sells/$(request.resource.data.lastOp))
+          && getAfter(/databases/$(database)/documents/sells/$(request.resource.data.lastOp)).data.uid == me()
+          && getAfter(/databases/$(database)/documents/sells/$(request.resource.data.lastOp)).data.aid == aid
+          && getAfter(/databases/$(database)/documents/sells/$(request.resource.data.lastOp)).data.qty == resource.data.count - request.resource.data.count;
         allow delete: if isAdmin() || me() == uid;
+      }
+
+      // Catatan hadiah like yang sudah diklaim
+      match /rewards/{rid} {
+        allow read: if signedIn() && (me() == uid || isAdmin());
+        allow create, update: if me() == uid
+          && request.resource.data.keys().hasOnly(['kind', 'ref', 'n'])
+          && request.resource.data.kind in ['post', 'track']
+          && rid == request.resource.data.kind + '_' + request.resource.data.ref
+          && request.resource.data.n is int;
+        allow delete: if isAdmin();
       }
 
       match /notifs/{nid} {
         allow read: if me() == uid;
         allow create: if signedIn() && uid != me()
           && request.resource.data.from == me()
-          && request.resource.data.keys().hasOnly(['from', 'type', 'text', 'read', 'createdAt', 'pid', 'sid'])
+          && request.resource.data.keys().hasOnly(['from', 'type', 'text', 'read', 'createdAt', 'pid', 'sid', 'lid'])
           && request.resource.data.text.size() <= 160
           && request.resource.data.read == false;
         allow update: if me() == uid && changed().hasOnly(['read']);
@@ -193,9 +245,13 @@ service cloud.firestore {
         return exists(/databases/$(database)/documents/config/pricing)
           ? get(/databases/$(database)/documents/config/pricing).data.get('likePack', 1000) : 1000;
       }
+      function boostOn() {
+        return !exists(/databases/$(database)/documents/config/features)
+          || get(/databases/$(database)/documents/config/features).data.get('boost', true) != false;
+      }
       function bTr() { return /databases/$(database)/documents/transfers/$(request.resource.data.bTx); }
       function boostOk() {
-        return resource.data.uid == me()
+        return resource.data.uid == me() && boostOn()
           && changed().hasOnly(['boost', 'bTx'])
           && request.resource.data.bTx is string
           && request.resource.data.boost is int
@@ -391,6 +447,23 @@ service cloud.firestore {
           allow read, create, delete: if signedIn();
         }
       }
+      // Live bareng: host mengundang tamu; tamu mengirim video ke host (host menggabungkan layar)
+      match /guests/{g} {
+        allow read: if signedIn();
+        allow write: if signedIn() && (me() == uid || g == me() || isAdmin());
+      }
+      match /grtc/{rid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.vid == me();
+        allow update: if signedIn() && (me() == uid || resource.data.vid == me());
+        allow delete: if signedIn() && (me() == uid || resource.data.vid == me() || isAdmin());
+        match /host/{c} {
+          allow read, create, delete: if signedIn();
+        }
+        match /viewer/{c} {
+          allow read, create, delete: if signedIn();
+        }
+      }
       match /chat/{c} {
         allow read: if signedIn();
         allow create: if signedIn() && request.resource.data.uid == me() && request.resource.data.text.size() <= 200
@@ -427,10 +500,78 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.uid == me()
         && usr(me()).badges.hasAny(['artist'])
-        && request.resource.data.keys().hasOnly(['uid', 'title', 'artist', 'cover', 'audioUrl', 'audioData', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['uid', 'title', 'artist', 'cover', 'audioUrl', 'audioData', 'likeCount', 'plays', 'createdAt'])
+        && request.resource.data.get('likeCount', 0) == 0
+        && request.resource.data.get('plays', 0) == 0
         && request.resource.data.title.size() <= 80;
-      allow update: if false;
+      allow update: if signedIn() && (
+        isAdmin()
+        || (changed().hasOnly(['likeCount']) && (
+              (request.resource.data.likeCount == resource.data.get('likeCount', 0) + 1
+                && !exists(/databases/$(database)/documents/tracks/$(id)/likes/$(me()))
+                && existsAfter(/databases/$(database)/documents/tracks/$(id)/likes/$(me())))
+           || (request.resource.data.likeCount == resource.data.get('likeCount', 0) - 1
+                && exists(/databases/$(database)/documents/tracks/$(id)/likes/$(me()))
+                && !existsAfter(/databases/$(database)/documents/tracks/$(id)/likes/$(me())))))
+        || (changed().hasOnly(['plays']) && request.resource.data.plays == resource.data.get('plays', 0) + 1)
+      );
       allow delete: if signedIn() && (resource.data.uid == me() || isAdmin());
+      match /likes/{u} {
+        allow read: if signedIn();
+        allow create: if signedIn() && u == me();
+        allow delete: if signedIn() && (u == me() || isAdmin());
+      }
+    }
+
+    // Catatan tukar aset jadi uang RVN
+    match /sells/{id} {
+      allow read: if signedIn() && (resource.data.uid == me() || isAdmin());
+      allow create: if signedIn()
+        && request.resource.data.uid == me()
+        && request.resource.data.keys().hasOnly(['uid', 'aid', 'qty', 'refund', 'at'])
+        && request.resource.data.qty is int && request.resource.data.qty > 0
+        && request.resource.data.refund is int
+        && catKind(request.resource.data.aid) == 'asset'
+        && request.resource.data.refund * 100 == request.resource.data.qty * catPrice(request.resource.data.aid) * 90;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Panggilan suara/video (sinyal WebRTC)
+    match /calls/{cid} {
+      allow read: if signedIn() && (resource.data.from == me() || resource.data.to == me() || isAdmin());
+      allow create: if signedIn()
+        && request.resource.data.from == me()
+        && request.resource.data.to != me()
+        && request.resource.data.type in ['voice', 'video']
+        && request.resource.data.status == 'ringing'
+        && request.resource.data.keys().hasOnly(['from', 'to', 'type', 'status', 'offer', 'answer', 'createdAt']);
+      allow update: if signedIn() && (resource.data.from == me() || resource.data.to == me());
+      allow delete: if signedIn() && (resource.data.from == me() || isAdmin());
+      match /caller/{c} {
+        allow read, create, delete: if signedIn()
+          && (get(/databases/$(database)/documents/calls/$(cid)).data.from == me() || get(/databases/$(database)/documents/calls/$(cid)).data.to == me());
+      }
+      match /callee/{c} {
+        allow read, create, delete: if signedIn()
+          && (get(/databases/$(database)/documents/calls/$(cid)).data.from == me() || get(/databases/$(database)/documents/calls/$(cid)).data.to == me());
+      }
+    }
+
+    // Pusat bantuan: laporan bug, kritik, saran
+    match /tickets/{id} {
+      allow read: if signedIn() && (resource.data.uid == me() || isAdmin());
+      allow create: if signedIn()
+        && request.resource.data.uid == me()
+        && request.resource.data.keys().hasOnly(['uid', 'cat', 'text', 'img', 'status', 'reply', 'at'])
+        && request.resource.data.cat in ['bug', 'kritik', 'saran', 'akun', 'lain']
+        && request.resource.data.status == 'open'
+        && request.resource.data.reply == ''
+        && request.resource.data.text.size() <= 600
+        && request.resource.data.img.size() <= 300000
+        && cleanTxt(request.resource.data.text);
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (signedIn() && resource.data.uid == me());
     }
 
     // Game RVNMATCH

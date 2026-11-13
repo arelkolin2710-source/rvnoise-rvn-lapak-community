@@ -87,3 +87,9 @@ Firestore tidak bisa menyimpan video, jadi video diunggah ke Cloudinary (paket g
 - Mode terang/gelap/otomatis + warna kustom (aksen & latar), akun pribadi, sembunyikan valuasi.
 - Suntik like (menggantikan promosi), pesan suara, tema chat (wallpaper/banner/emoji/warna), kotak kejutan, undang kolaborator.
 - Upload reels maksimal 20 MB. Publish ulang firestore.rules.
+
+## v16
+Tahap 2: musik ala Spotify (chart, artis, disukai, pencapaian, hadiah 10 noisevn / 100 like). Tahap 3: undang nonton & live bareng, call suara/video, tukar aset jadi uang RVN (90%). Setelah upload, paste ulang `firestore.rules` lalu Publish.
+
+## v17
+Pusat Bantuan (ikon headphone), foto postingan bebas rasio, Dashboard sidebar + Saklar Fitur + harga suntik like, tombol Dashboard otomatis untuk areelkolin@gmail.com, install lebih mulus, aplikasi lebih ringan. Paste ulang `firestore.rules` lalu Publish.
