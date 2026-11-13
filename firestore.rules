@@ -184,12 +184,44 @@ service cloud.firestore {
     }
 
     match /posts/{pid} {
+      // Suntik like: owner membeli paket like lewat transfer ke akun resmi (harga di config/pricing, default Rp20.000 per 1000 like)
+      function cfgPrice() {
+        return exists(/databases/$(database)/documents/config/pricing)
+          ? get(/databases/$(database)/documents/config/pricing).data.get('likePrice', 20000) : 20000;
+      }
+      function cfgPack() {
+        return exists(/databases/$(database)/documents/config/pricing)
+          ? get(/databases/$(database)/documents/config/pricing).data.get('likePack', 1000) : 1000;
+      }
+      function bTr() { return /databases/$(database)/documents/transfers/$(request.resource.data.bTx); }
+      function boostOk() {
+        return resource.data.uid == me()
+          && changed().hasOnly(['boost', 'bTx'])
+          && request.resource.data.bTx is string
+          && request.resource.data.boost is int
+          && request.resource.data.boost > resource.data.get('boost', 0)
+          && !exists(bTr()) && existsAfter(bTr())
+          && getAfter(bTr()).data.from == me()
+          && getAfter(bTr()).data.to == 'official-rvnoise'
+          && getAfter(bTr()).data.amount * cfgPack() == (request.resource.data.boost - resource.data.get('boost', 0)) * cfgPrice();
+      }
+      // Kolaborator: orang yang diundang boleh menambahkan dirinya sendiri
+      function collabOk() {
+        return changed().hasOnly(['collab'])
+          && me() in resource.data.get('collabInv', [])
+          && !(me() in resource.data.get('collab', []))
+          && request.resource.data.collab.size() == resource.data.get('collab', []).size() + 1
+          && me() in request.resource.data.collab
+          && request.resource.data.collab.hasAll(resource.data.get('collab', []));
+      }
       allow read: if signedIn();
       allow create: if signedIn()
+        && request.resource.data.get('collab', []).size() == 0
+        && request.resource.data.get('collabInv', []).size() <= 3
         && request.resource.data.likeCount == 0
         && request.resource.data.commentCount == 0
         && request.resource.data.type in ['photo', 'tweet', 'reel']
-        && request.resource.data.keys().hasOnly(['uid', 'type', 'text', 'images', 'music', 'video', 'repostOf', 'excl', 'likeCount', 'commentCount', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'text', 'images', 'music', 'video', 'repostOf', 'excl', 'collabInv', 'collab', 'likeCount', 'commentCount', 'createdAt'])
         && request.resource.data.text.size() <= 500
         && cleanTxt(request.resource.data.text)
         && (isAdmin() || request.resource.data.uid == me());
@@ -204,6 +236,8 @@ service cloud.firestore {
                 && !existsAfter(/databases/$(database)/documents/posts/$(pid)/likes/$(me())))))
         || (changed().hasOnly(['commentCount'])
               && math.abs(request.resource.data.commentCount - resource.data.commentCount) == 1)
+        || boostOk()
+        || collabOk()
       );
       allow delete: if signedIn() && (resource.data.uid == me() || isAdmin());
 
@@ -285,8 +319,9 @@ service cloud.firestore {
         allow read: if signedIn() && me() in get(/databases/$(database)/documents/chats/$(cid)).data.members;
         allow create: if signedIn() && request.resource.data.from == me()
           && me() in get(/databases/$(database)/documents/chats/$(cid)).data.members
-          && request.resource.data.keys().hasOnly(['from', 'text', 'img', 'kind', 'ref', 'createdAt'])
+          && request.resource.data.keys().hasOnly(['from', 'text', 'img', 'kind', 'ref', 'aud', 'dur', 'createdAt'])
           && request.resource.data.text.size() <= 1000
+          && request.resource.data.get('aud', '').size() <= 700000
           && cleanTxt(request.resource.data.text);
         allow update: if false;
         allow delete: if isAdmin();

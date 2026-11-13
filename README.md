@@ -78,3 +78,12 @@ Firestore tidak bisa menyimpan video, jadi video diunggah ke Cloudinary (paket g
 - Konten eksklusif (Centang Biru atau minimal pengikut sesuai admin), promosi like (default 20.000 per 1.000 like, diatur admin), streak chat harian.
 - Catatan: konten eksklusif dikunci di tampilan aplikasi. Karena aplikasi tidak memakai server, data postingan tetap bisa dibaca lewat API Firestore oleh pengguna yang paham teknis.
 - **Publikasikan ulang firestore.rules terbaru.**
+
+## Pembaruan v12
+- Tombol "Unduh aplikasi" tetap ada, tapi memasang lewat pintasan PWA (tanpa file APK). Lihat `PANDUAN-APK.md`.
+- Zoom, seleksi teks, dan menu salin/Google dimatikan; notifikasi bergaya Instagram.
+
+## Pembaruan v15 (tahap 1)
+- Mode terang/gelap/otomatis + warna kustom (aksen & latar), akun pribadi, sembunyikan valuasi.
+- Suntik like (menggantikan promosi), pesan suara, tema chat (wallpaper/banner/emoji/warna), kotak kejutan, undang kolaborator.
+- Upload reels maksimal 20 MB. Publish ulang firestore.rules.
